@@ -29,7 +29,7 @@ jobs:
       - name: Generate page
         run: |
           mkdir -p public
-          wget -O public/metrics http://localhost:8080/metrics
+          wget -O public/metrics http://switchbot_exporter:8080/metrics
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
