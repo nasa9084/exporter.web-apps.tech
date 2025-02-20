@@ -1,0 +1,46 @@
+---
+name: switchbot
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      switchbot_exporter:
+        image: nasa9084/switchbot-exporter:latest
+        ports:
+          - 8080
+        env:
+          SWITCHBOT_OPENTOKEN: ${{ secrets.switchbot_open_token }}
+          SWITCHBOT_SECRETKEY: ${{ secrets.switchbot_secret_key }}
+
+    steps:
+      - name: Generate page
+        run: wget -O public/metrics http://localhost:8080/metrics
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: build
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
