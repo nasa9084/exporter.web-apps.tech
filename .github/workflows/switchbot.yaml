@@ -27,7 +27,9 @@ jobs:
 
     steps:
       - name: Generate page
-        run: wget -O public/metrics http://localhost:8080/metrics
+        run: |
+          mkdir -p public
+          wget -O public/metrics http://localhost:8080/metrics
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
