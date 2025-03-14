@@ -115,7 +115,7 @@ func execute() error {
 		return err
 	}
 
-	return nil
+	return push(&buf)
 }
 
 func parseMetricLine(line string) (Metric, error) {
