@@ -26,6 +26,8 @@ jobs:
           SWITCHBOT_SECRETKEY: ${{ secrets.switchbot_secret_key }}
 
     steps:
+      - name: Sleep for a while
+        run: sleep 5s
       - name: Generate page
         run: |
           mkdir -p public
