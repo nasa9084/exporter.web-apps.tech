@@ -32,6 +32,7 @@ jobs:
           touch public/metrics
 
           for target in DFA0029F2622 CE1A63890B72 EBFDB59B1D71 CE2A4506107C CE2A46463E09 D93431301B19; do
+            echo "ID: ${target}"
             curl "http://localhost:8080/metrics?target=${target}"
           done
 
