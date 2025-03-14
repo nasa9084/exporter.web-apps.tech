@@ -98,17 +98,6 @@ func execute() error {
 
 			metric.Gauge.DataPoints[0].TimeUnixNano = now
 
-			switch {
-			case strings.HasSuffix(metric.Name, "voltage"):
-				metric.Unit = "v"
-			case strings.HasSuffix(metric.Name, "temperature"):
-				metric.Unit = "℃"
-			case strings.HasSuffix(metric.Name, "humidity"):
-				metric.Unit = "%"
-			case strings.HasSuffix(metric.Name, "CO2"):
-				metric.Unit = "ppm"
-			}
-
 			data.ResourceMetrics[0].ScopeMetrics[0].Metrics = append(
 				data.ResourceMetrics[0].ScopeMetrics[0].Metrics,
 				metric,
