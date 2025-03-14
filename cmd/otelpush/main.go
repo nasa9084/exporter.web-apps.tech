@@ -42,7 +42,7 @@ type Gauge struct {
 
 type DataPoint struct {
 	AsInt        int         `json:"asInt,omitzero"`
-	AsDouble     float64     `json:"asDouble,omitzero"`
+	AsDouble     float64     `json:"asDouble"`
 	TimeUnixNano int64       `json:"timeUnixNano"`
 	Attributes   []Attribute `json:"attributes"`
 }
@@ -96,17 +96,13 @@ func execute() error {
 				return fmt.Errorf("error parsing metric line: %w", err)
 			}
 
-			if metric.Gauge.DataPoints[0].AsInt == 0 && metric.Gauge.DataPoints[0].AsDouble == 0 {
-				continue
-			}
-
 			metric.Gauge.DataPoints[0].TimeUnixNano = now
 
 			switch {
 			case strings.HasSuffix(metric.Name, "voltage"):
 				metric.Unit = "v"
 			case strings.HasSuffix(metric.Name, "temperature"):
-				metric.Unit = "C"
+				metric.Unit = "℃"
 			case strings.HasSuffix(metric.Name, "humidity"):
 				metric.Unit = "%"
 			case strings.HasSuffix(metric.Name, "CO2"):
@@ -140,6 +136,7 @@ func parseMetricName(line string, metric Metric, name string) (Metric, error) {
 	switch r, size := utf8.DecodeRuneInString(line); r {
 	case '{':
 		metric.Name = name
+		metric.Gauge.DataPoints = append(metric.Gauge.DataPoints, DataPoint{})
 		return parseLabels(line[size:], metric)
 	default:
 		return parseMetricName(line[size:], metric, name+string([]rune{r}))
@@ -175,14 +172,10 @@ func parseLabelKey(line string, metric Metric, labelKey string) (Metric, error) 
 func parseLabelValue(line string, metric Metric, labelKey, labelValue string) (Metric, error) {
 	switch r, size := utf8.DecodeRuneInString(line); r {
 	case '"':
-		metric.Gauge.DataPoints = append(metric.Gauge.DataPoints, DataPoint{
-			Attributes: []Attribute{
-				{
-					Key: labelKey,
-					Value: map[string]string{
-						"stringValue": labelValue,
-					},
-				},
+		metric.Gauge.DataPoints[0].Attributes = append(metric.Gauge.DataPoints[0].Attributes, Attribute{
+			Key: labelKey,
+			Value: map[string]string{
+				"stringValue": labelValue,
 			},
 		})
 		return parseLabels(line[size:], metric)
@@ -224,8 +217,14 @@ func push(r io.Reader) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	b, err := httputil.DumpRequestOut(req, true)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Request:\n%s", b)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
