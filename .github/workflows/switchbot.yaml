@@ -20,7 +20,7 @@ jobs:
       switchbot_exporter:
         image: nasa9084/switchbot-exporter:latest
         ports:
-          - 8080:8080
+          - 8080/tcp
         env:
           SWITCHBOT_OPENTOKEN: ${{ secrets.switchbot_open_token }}
           SWITCHBOT_SECRETKEY: ${{ secrets.switchbot_secret_key }}
@@ -33,7 +33,7 @@ jobs:
 
           for target in DFA0029F2622 CE1A63890B72 EBFDB59B1D71 CE2A4506107C CE2A46463E09 D93431301B19; do
             echo "ID: ${target}"
-            curl "http://localhost:8080/metrics?target=${target}"
+            curl "http://localhost:${{ job.services.switchbot_exporter.ports['8080'] }}/metrics?target=${target}"
           done
 
       - name: Upload artifact
