@@ -34,6 +34,7 @@ jobs:
           touch public/metrics
 
           curl -s "http://localhost:${{ job.services.switchbot_exporter.ports['8080'] }}/metrics" | tee public/metrics
+          cp public/metrics public/metrics.txt
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
