@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"strconv"
 	"strings"
@@ -17,38 +18,38 @@ import (
 )
 
 type Data struct {
-	ResourceMetrics []ResourceMetric
+	ResourceMetrics []ResourceMetric `json:"resourceMetrics"`
 }
 
 type ResourceMetric struct {
-	ScopeMetrics []ScopeMetric
+	ScopeMetrics []ScopeMetric `json:"scopeMetrics"`
 }
 
 type ScopeMetric struct {
-	Metrics []Metric
+	Metrics []Metric `json:"metrics"`
 }
 
 type Metric struct {
-	Name        string
-	Unit        string
-	Description string
-	Gauge       Gauge
+	Name        string `json:"name"`
+	Unit        string `json:"unit"`
+	Description string `json:"description"`
+	Gauge       Gauge  `json:"gauge"`
 }
 
 type Gauge struct {
-	DataPoints []DataPoint
+	DataPoints []DataPoint `json:"dataPoints"`
 }
 
 type DataPoint struct {
-	AsInt        int     `json:",omitzero"`
-	AsDouble     float64 `json:",omitezero"`
-	TimeUnixNano int64
-	Attributes   []Attribute
+	AsInt        int         `json:"asInt,omitzero"`
+	AsDouble     float64     `json:"asDouble,omitzero"`
+	TimeUnixNano int64       `json:"timeUnixNano"`
+	Attributes   []Attribute `json:"attributes"`
 }
 
 type Attribute struct {
-	Key   string
-	Value map[string]string
+	Key   string            `json:"key"`
+	Value map[string]string `json:"value"`
 }
 
 func main() {
@@ -94,7 +95,23 @@ func execute() error {
 			if err != nil {
 				return fmt.Errorf("error parsing metric line: %w", err)
 			}
+
+			if metric.Gauge.DataPoints[0].AsInt == 0 && metric.Gauge.DataPoints[0].AsDouble == 0 {
+				continue
+			}
+
 			metric.Gauge.DataPoints[0].TimeUnixNano = now
+
+			switch {
+			case strings.HasSuffix(metric.Name, "voltage"):
+				metric.Unit = "v"
+			case strings.HasSuffix(metric.Name, "temperature"):
+				metric.Unit = "C"
+			case strings.HasSuffix(metric.Name, "humidity"):
+				metric.Unit = "%"
+			case strings.HasSuffix(metric.Name, "CO2"):
+				metric.Unit = "ppm"
+			}
 
 			data.ResourceMetrics[0].ScopeMetrics[0].Metrics = append(
 				data.ResourceMetrics[0].ScopeMetrics[0].Metrics,
@@ -109,10 +126,6 @@ func execute() error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(data); err != nil {
-		return err
-	}
-
-	if _, err := buf.WriteTo(os.Stdout); err != nil {
 		return err
 	}
 
@@ -219,5 +232,17 @@ func push(r io.Reader) error {
 	defer resp.Body.Close()
 
 	log.Println("Response Status:", resp.Status)
+
+	if resp.StatusCode != http.StatusOK {
+		b, err := httputil.DumpResponse(resp, true)
+		if err != nil {
+			return err
+		}
+
+		log.Printf("Response Body:\n%s", b)
+
+		return fmt.Errorf("unexpected http status code: %s", resp.Status)
+	}
+
 	return nil
 }
