@@ -69,3 +69,5 @@ jobs:
 
       - name: Push
         run: go run ./cmd/otelpush
+        env:
+          GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
