@@ -33,7 +33,7 @@ jobs:
           mkdir -p public
           touch public/metrics
 
-          curl "http://localhost:${{ job.services.switchbot_exporter.ports['8080'] }}/metrics"
+          curl -s "http://localhost:${{ job.services.switchbot_exporter.ports['8080'] }}/metrics" | tee public/metrics
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
