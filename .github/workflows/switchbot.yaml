@@ -20,7 +20,7 @@ jobs:
       switchbot_exporter:
         image: nasa9084/switchbot-exporter:latest
         ports:
-          - 8080
+          - 8080:8080
         env:
           SWITCHBOT_OPENTOKEN: ${{ secrets.switchbot_open_token }}
           SWITCHBOT_SECRETKEY: ${{ secrets.switchbot_secret_key }}
