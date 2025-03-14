@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -195,18 +196,20 @@ func parseMetricValue(line string, metric Metric) (Metric, error) {
 }
 
 func push(r io.Reader) error {
-	API_KEY := os.Getenv("GRAFANA_API_KEY")
-	HOST := "https://otlp-gateway-prod-ap-northeast-0.grafana.net/otlp/v1/metrics"
+	apiKey := os.Getenv("GRAFANA_API_KEY")
+	if apiKey == "" {
+		return errors.New("GRAFANA_API_KEY is not configured")
+	}
 
-	URL := fmt.Sprintf("https://%s/otlp/v1/metrics", HOST)
+	url := fmt.Sprintf("https://otlp-gateway-prod-ap-northeast-0.grafana.net/otlp/v1/metrics")
 
-	req, err := http.NewRequest(http.MethodPost, URL, r)
+	req, err := http.NewRequest(http.MethodPost, url, r)
 	if err != nil {
 		return err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+API_KEY)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
