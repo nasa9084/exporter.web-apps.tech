@@ -40,8 +40,18 @@ type Gauge struct {
 	DataPoints []DataPoint `json:"dataPoints"`
 }
 
-type DataPoint struct {
-	AsInt        int         `json:"asInt,omitzero"`
+type DataPoint interface {
+	SetTimeUnixNano(int64)
+	SetAttributes([]Attribute)
+}
+
+type IntDataPoint struct {
+	AsInt        int         `json:"asInt"`
+	TimeUnixNano int64       `json:"timeUnixNano"`
+	Attributes   []Attribute `json:"attributes"`
+}
+
+type DoubleDataPoint struct {
 	AsDouble     float64     `json:"asDouble"`
 	TimeUnixNano int64       `json:"timeUnixNano"`
 	Attributes   []Attribute `json:"attributes"`
@@ -59,7 +69,7 @@ func main() {
 }
 
 func execute() error {
-	resp, err := http.Get("https://exporter.web-apps.tech/metrics")
+	resp, err := http.Get("http://localhost:8080/metrics")
 	if err != nil {
 		return fmt.Errorf("failed to get metrics: %w", err)
 	}
@@ -96,7 +106,7 @@ func execute() error {
 				return fmt.Errorf("error parsing metric line: %w", err)
 			}
 
-			metric.Gauge.DataPoints[0].TimeUnixNano = now
+			metric.Gauge.DataPoints[0].SetTimeUnixNano(now)
 
 			data.ResourceMetrics[0].ScopeMetrics[0].Metrics = append(
 				data.ResourceMetrics[0].ScopeMetrics[0].Metrics,
@@ -125,7 +135,6 @@ func parseMetricName(line string, metric Metric, name string) (Metric, error) {
 	switch r, size := utf8.DecodeRuneInString(line); r {
 	case '{':
 		metric.Name = name
-		metric.Gauge.DataPoints = append(metric.Gauge.DataPoints, DataPoint{})
 		return parseLabels(line[size:], metric)
 	default:
 		return parseMetricName(line[size:], metric, name+string([]rune{r}))
@@ -135,7 +144,12 @@ func parseMetricName(line string, metric Metric, name string) (Metric, error) {
 func parseLabels(line string, metric Metric) (Metric, error) {
 	switch r, size := utf8.DecodeRuneInString(line); r {
 	case '}':
-		return parseMetricValue(line[size:], metric)
+		dp, err := parseMetricValue(line[size:], metric)
+		if err != nil {
+			return metric, err
+		}
+		metric.Gauge.DataPoints = append(metric.Gauge.DataPoints, dp)
+		return metric, nil
 	case '"', '=':
 		return metric, fmt.Errorf("unexpected `%c`", r)
 	case ',':
@@ -161,32 +175,30 @@ func parseLabelKey(line string, metric Metric, labelKey string) (Metric, error) 
 func parseLabelValue(line string, metric Metric, labelKey, labelValue string) (Metric, error) {
 	switch r, size := utf8.DecodeRuneInString(line); r {
 	case '"':
-		metric.Gauge.DataPoints[0].Attributes = append(metric.Gauge.DataPoints[0].Attributes, Attribute{
+		metric.Gauge.DataPoints[0].SetAttributes([]Attribute{{
 			Key: labelKey,
 			Value: map[string]string{
 				"stringValue": labelValue,
 			},
-		})
+		}})
 		return parseLabels(line[size:], metric)
 	default:
 		return parseLabelValue(line[size:], metric, labelKey, labelValue+string([]rune{r}))
 	}
 }
 
-func parseMetricValue(line string, metric Metric) (Metric, error) {
+func parseMetricValue(line string, metric Metric) (DataPoint, error) {
 	r, size := utf8.DecodeRuneInString(line)
 	if r != ' ' {
-		return metric, fmt.Errorf("` ` is expected but got `%c`", r)
+		return nil, fmt.Errorf("` ` is expected but got `%c`", r)
 	}
 
 	if i, err := strconv.Atoi(line[size:]); err == nil {
-		metric.Gauge.DataPoints[0].AsInt = i
-		return metric, nil
+		return &IntDataPoint{AsInt: i}, nil
 	} else if f, err := strconv.ParseFloat(line[size:], 64); err == nil {
-		metric.Gauge.DataPoints[0].AsDouble = f
-		return metric, nil
+		return &DoubleDataPoint{AsDouble: f}, nil
 	} else {
-		return metric, fmt.Errorf("couldn't parse the value part: %s", line[size:])
+		return nil, fmt.Errorf("couldn't parse the value part: %s", line[size:])
 	}
 }
 
@@ -233,4 +245,20 @@ func push(r io.Reader) error {
 	}
 
 	return nil
+}
+
+func (idp *IntDataPoint) SetTimeUnixNano(t int64) {
+	idp.TimeUnixNano = t
+}
+
+func (idp *IntDataPoint) SetAttributes(attributes []Attribute) {
+	idp.Attributes = attributes
+}
+
+func (ddp *DoubleDataPoint) SetTimeUnixNano(t int64) {
+	ddp.TimeUnixNano = t
+}
+
+func (ddp *DoubleDataPoint) SetAttributes(attributes []Attribute) {
+	ddp.Attributes = attributes
 }
