@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httputil"
 	"os"
@@ -125,6 +126,22 @@ func execute() error {
 	}
 
 	return push(&buf)
+}
+
+func retryHTTPGet(target string, retryCount int) (*http.Response, error) {
+	for i := 0; i < retryCount; i++ {
+		resp, err := http.Get("http://localhost:8080/metrics")
+		if err != nil {
+			log.Print("failed to get metrics: %w", err)
+
+			time.Sleep(time.Duration(math.Pow(2, float64(i))) * time.Second)
+			continue
+		}
+
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("failed %d times and gave up", retryCount)
 }
 
 func parseMetricLine(line string) (Metric, error) {
