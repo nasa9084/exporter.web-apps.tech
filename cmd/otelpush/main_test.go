@@ -55,6 +55,64 @@ func TestParseMetricLine(t *testing.T) {
 				},
 			},
 		},
+		"double": {
+			Line: `metric_name{foo="bar", baz="qux"} 300.5`,
+			Want: Metric{
+				Name: "metric_name",
+				Gauge: Gauge{
+					DataPoints: []DataPoint{
+						DataPoint{
+							AsDouble:     300.5,
+							TimeUnixNano: clock.Now().UnixNano(),
+							Attributes: []Attribute{
+								Attribute{
+									Key: "foo",
+									Value: map[string]string{
+										"stringValue": "bar",
+									},
+								},
+								Attribute{
+									Key: "baz",
+									Value: map[string]string{
+										"stringValue": "qux",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		"no label": {
+			Line: `metric_name 300.5`,
+			Want: Metric{
+				Name: "metric_name",
+				Gauge: Gauge{
+					DataPoints: []DataPoint{
+						DataPoint{
+							AsDouble:     300.5,
+							TimeUnixNano: clock.Now().UnixNano(),
+							Attributes:   nil,
+						},
+					},
+				},
+			},
+		},
+		"negative value": {
+			Line: `metric_name -300.5`,
+			Want: Metric{
+				Name: "metric_name",
+				Gauge: Gauge{
+					DataPoints: []DataPoint{
+						DataPoint{
+							AsDouble:     -300.5,
+							TimeUnixNano: clock.Now().UnixNano(),
+							Attributes:   nil,
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for label, tt := range tests {

@@ -199,7 +199,7 @@ func parseMetricName(r *bufio.Reader, ch chan Token) StateFunc {
 		}
 
 		switch c {
-		case '{':
+		case '{', ' ':
 			ch <- TokenFunc(func(m *Metric) error {
 				m.Name = buf.String()
 				return nil
@@ -209,7 +209,12 @@ func parseMetricName(r *bufio.Reader, ch chan Token) StateFunc {
 				return parseError(err)
 			}
 
-			return parseLabels
+			switch c {
+			case '{':
+				return parseLabels
+			case ' ':
+				return parseMetricValue
+			}
 		default:
 			if err := consumeRune(r); err != nil {
 				return parseError(err)
@@ -318,7 +323,7 @@ func parseMetricValue(r *bufio.Reader, ch chan Token) StateFunc {
 	}
 
 	var buf bytes.Buffer
-	acceptable := []rune{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'}
+	acceptable := []rune{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '-'}
 	for {
 		c, err := readRune(r)
 		if err != nil {
