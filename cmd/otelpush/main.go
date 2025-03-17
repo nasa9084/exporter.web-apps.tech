@@ -70,7 +70,7 @@ func main() {
 }
 
 func execute() error {
-	resp, err := http.Get("http://localhost:8080/metrics")
+	resp, err := retryHTTPGet("http://localhost:8080/metrics", 5)
 	if err != nil {
 		return fmt.Errorf("failed to get metrics: %w", err)
 	}
