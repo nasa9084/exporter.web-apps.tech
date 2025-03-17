@@ -132,9 +132,11 @@ func retryHTTPGet(target string, retryCount int) (*http.Response, error) {
 	for i := 0; i < retryCount; i++ {
 		resp, err := http.Get("http://localhost:8080/metrics")
 		if err != nil {
-			log.Print("failed to get metrics: %w", err)
+			log.Print("failed to get metrics: %s", err)
 
-			time.Sleep(time.Duration(math.Pow(2, float64(i))) * time.Second)
+			sleep := int(math.Pow(2, float64(i)))
+			log.Printf("wait for %s seconds", sleep)
+			time.Sleep(time.Duration(sleep) * time.Second)
 			continue
 		}
 
