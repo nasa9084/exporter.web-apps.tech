@@ -70,7 +70,7 @@ func main() {
 }
 
 func execute() error {
-	resp, err := retryHTTPGet("http://localhost:8080/metrics", 5)
+	resp, err := retryHTTPGet(fmt.Sprintf("http://localhost:%s/metrics", os.Getenv("EXPORTER_PORT")), 5)
 	if err != nil {
 		return fmt.Errorf("failed to get metrics: %w", err)
 	}
@@ -130,12 +130,12 @@ func execute() error {
 
 func retryHTTPGet(target string, retryCount int) (*http.Response, error) {
 	for i := 0; i < retryCount; i++ {
-		resp, err := http.Get("http://localhost:8080/metrics")
+		resp, err := http.Get(target)
 		if err != nil {
 			log.Print("failed to get metrics: %s", err)
 
-			sleep := int(math.Pow(2, float64(i)))
-			log.Printf("wait for %s seconds", sleep)
+			sleep := int(math.Pow(2, float64(i+1)))
+			log.Printf("wait for %d seconds", sleep)
 			time.Sleep(time.Duration(sleep) * time.Second)
 			continue
 		}

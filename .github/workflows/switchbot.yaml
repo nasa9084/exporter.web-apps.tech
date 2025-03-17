@@ -38,3 +38,4 @@ jobs:
         run: go run ./cmd/otelpush
         env:
           GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
+          EXPORTER_PORT: ${{ job.services.switchbot_exporter.ports['8080'] }}
