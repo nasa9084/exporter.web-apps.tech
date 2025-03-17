@@ -12,10 +12,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 type Data struct {
@@ -41,18 +41,7 @@ type Gauge struct {
 	DataPoints []DataPoint `json:"dataPoints"`
 }
 
-type DataPoint interface {
-	SetTimeUnixNano(int64)
-	SetAttributes([]Attribute)
-}
-
-type IntDataPoint struct {
-	AsInt        int         `json:"asInt"`
-	TimeUnixNano int64       `json:"timeUnixNano"`
-	Attributes   []Attribute `json:"attributes"`
-}
-
-type DoubleDataPoint struct {
+type DataPoint struct {
 	AsDouble     float64     `json:"asDouble"`
 	TimeUnixNano int64       `json:"timeUnixNano"`
 	Attributes   []Attribute `json:"attributes"`
@@ -91,7 +80,6 @@ func execute() error {
 		},
 	}
 
-	now := time.Now().UnixNano()
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -106,8 +94,6 @@ func execute() error {
 			if err != nil {
 				return fmt.Errorf("error parsing metric line: %w", err)
 			}
-
-			metric.Gauge.DataPoints[0].SetTimeUnixNano(now)
 
 			data.ResourceMetrics[0].ScopeMetrics[0].Metrics = append(
 				data.ResourceMetrics[0].ScopeMetrics[0].Metrics,
@@ -132,7 +118,7 @@ func retryHTTPGet(target string, retryCount int) (*http.Response, error) {
 	for i := 0; i < retryCount; i++ {
 		resp, err := http.Get(target)
 		if err != nil {
-			log.Print("failed to get metrics: %s", err)
+			log.Printf("failed to get metrics: %s", err)
 
 			sleep := int(math.Pow(2, float64(i+1)))
 			log.Printf("wait for %d seconds", sleep)
@@ -146,78 +132,248 @@ func retryHTTPGet(target string, retryCount int) (*http.Response, error) {
 	return nil, fmt.Errorf("failed %d times and gave up", retryCount)
 }
 
-func parseMetricLine(line string) (Metric, error) {
-	return parseMetricName(line, Metric{}, "")
-}
-
-func parseMetricName(line string, metric Metric, name string) (Metric, error) {
-	switch r, size := utf8.DecodeRuneInString(line); r {
-	case '{':
-		metric.Name = name
-		return parseLabels(line[size:], metric)
-	default:
-		return parseMetricName(line[size:], metric, name+string([]rune{r}))
+func NewMetric() Metric {
+	return Metric{
+		Gauge: Gauge{
+			DataPoints: []DataPoint{{
+				TimeUnixNano: clock.Now().UnixNano(),
+			}},
+		},
 	}
 }
 
-func parseLabels(line string, metric Metric) (Metric, error) {
-	switch r, size := utf8.DecodeRuneInString(line); r {
-	case '}':
-		dp, err := parseMetricValue(line[size:], metric)
-		if err != nil {
+type StateFunc func(*bufio.Reader, chan Token) StateFunc
+
+type Token interface {
+	Apply(*Metric) error
+}
+
+type TokenFunc func(*Metric) error
+
+func (f TokenFunc) Apply(m *Metric) error { return f(m) }
+
+type LabelToken struct {
+	Key, Value string
+}
+
+func (t LabelToken) Apply(m *Metric) error {
+	m.Gauge.DataPoints[0].Attributes = append(m.Gauge.DataPoints[0].Attributes, Attribute{
+		Key: t.Key,
+		Value: map[string]string{
+			"stringValue": t.Value,
+		},
+	})
+	return nil
+}
+
+func parseMetricLine(line string) (Metric, error) {
+	buf := bufio.NewReader(strings.NewReader(line))
+
+	ch := make(chan Token, 1)
+	go func() {
+		defer close(ch)
+
+		var state StateFunc = parseMetricName
+		for state != nil {
+			state = state(buf, ch)
+		}
+	}()
+
+	metric := NewMetric()
+	for token := range ch {
+		if err := token.Apply(&metric); err != nil {
 			return metric, err
 		}
-		metric.Gauge.DataPoints = append(metric.Gauge.DataPoints, dp)
-		return metric, nil
-	case '"', '=':
-		return metric, fmt.Errorf("unexpected `%c`", r)
-	case ',':
-		return parseLabelKey(line[size:], metric, "")
-	default:
-		return parseLabelKey(line, metric, "")
 	}
+
+	return metric, nil
 }
 
-func parseLabelKey(line string, metric Metric, labelKey string) (Metric, error) {
-	switch r, size := utf8.DecodeRuneInString(line); r {
-	case '=':
-		if r2, size2 := utf8.DecodeRuneInString(line[size:]); r2 == '"' {
-			return parseLabelValue(line[size+size2:], metric, labelKey, "")
-		} else {
-			return metric, fmt.Errorf("`\"` is expected but got %c", r2)
+func parseMetricName(r *bufio.Reader, ch chan Token) StateFunc {
+	var buf bytes.Buffer
+
+	for {
+		c, err := peekRune(r)
+		if err != nil {
+			return parseError(err)
 		}
-	default:
-		return parseLabelKey(line[size:], metric, labelKey+string([]rune{r}))
+
+		switch c {
+		case '{':
+			ch <- TokenFunc(func(m *Metric) error {
+				m.Name = buf.String()
+				return nil
+			})
+
+			if err := consumeRune(r); err != nil {
+				return parseError(err)
+			}
+
+			return parseLabels
+		default:
+			if err := consumeRune(r); err != nil {
+				return parseError(err)
+			}
+
+			buf.WriteRune(c)
+		}
 	}
 }
 
-func parseLabelValue(line string, metric Metric, labelKey, labelValue string) (Metric, error) {
-	switch r, size := utf8.DecodeRuneInString(line); r {
-	case '"':
-		metric.Gauge.DataPoints[0].SetAttributes([]Attribute{{
-			Key: labelKey,
-			Value: map[string]string{
-				"stringValue": labelValue,
-			},
-		}})
-		return parseLabels(line[size:], metric)
+func parseLabels(r *bufio.Reader, ch chan Token) StateFunc {
+	c, err := peekRune(r)
+	if err != nil {
+		return parseError(err)
+	}
+
+	switch c {
+	case ',', ' ':
+		if err := consumeRune(r); err != nil {
+			return parseError(err)
+		}
+
+		return parseLabels
+	case '}':
+		if err := consumeRune(r); err != nil {
+			return parseError(err)
+		}
+
+		return parseMetricValue
 	default:
-		return parseLabelValue(line[size:], metric, labelKey, labelValue+string([]rune{r}))
+		return parseLabel
 	}
 }
 
-func parseMetricValue(line string, metric Metric) (DataPoint, error) {
-	r, size := utf8.DecodeRuneInString(line)
-	if r != ' ' {
-		return nil, fmt.Errorf("` ` is expected but got `%c`", r)
+func parseLabel(r *bufio.Reader, ch chan Token) StateFunc {
+	var token LabelToken
+	if err := parseLabelKey(r, &token); err != nil {
+		return parseError(err)
 	}
 
-	if i, err := strconv.Atoi(line[size:]); err == nil {
-		return &IntDataPoint{AsInt: i}, nil
-	} else if f, err := strconv.ParseFloat(line[size:], 64); err == nil {
-		return &DoubleDataPoint{AsDouble: f}, nil
-	} else {
-		return nil, fmt.Errorf("couldn't parse the value part: %s", line[size:])
+	if c, err := readRune(r); err != nil {
+		return parseError(err)
+	} else if c != '"' {
+		return parseError(fmt.Errorf("`\"` is expected but got %c", c))
+	}
+
+	if err := parseLabelValue(r, &token); err != nil {
+		return parseError(err)
+	}
+
+	ch <- token
+
+	return parseLabels
+}
+
+func parseLabelKey(r *bufio.Reader, token *LabelToken) error {
+	var buf bytes.Buffer
+	for {
+		c, err := readRune(r)
+		if err != nil {
+			return err
+		}
+
+		switch c {
+		case '=':
+			token.Key = buf.String()
+			return nil
+		default:
+			buf.WriteRune(c)
+		}
+	}
+}
+
+func parseLabelValue(r *bufio.Reader, token *LabelToken) error {
+	var buf bytes.Buffer
+	for {
+		c, err := readRune(r)
+		if err != nil {
+			return err
+		}
+
+		switch c {
+		case '"':
+			token.Value = buf.String()
+			return nil
+		default:
+			buf.WriteRune(c)
+		}
+	}
+}
+
+func parseMetricValue(r *bufio.Reader, ch chan Token) StateFunc {
+	c, err := peekRune(r)
+	if err != nil {
+		return parseError(err)
+	}
+
+	switch c {
+	case ' ':
+		if err := consumeRune(r); err != nil {
+			return parseError(err)
+		}
+
+		return parseMetricValue
+	default:
+	}
+
+	var buf bytes.Buffer
+	acceptable := []rune{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.'}
+	for {
+		c, err := readRune(r)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				value := buf.String()
+				if f, err := strconv.ParseFloat(value, 64); err != nil {
+					return parseError(err)
+				} else {
+					ch <- TokenFunc(func(m *Metric) error {
+						m.Gauge.DataPoints[0].AsDouble = f
+						return nil
+					})
+					return nil
+				}
+			}
+
+			return parseError(err)
+		}
+
+		if slices.Contains(acceptable, c) {
+			buf.WriteRune(c)
+		} else {
+			return parseError(fmt.Errorf("parseMetricValue: unexpected %c", c))
+		}
+	}
+}
+
+func readRune(r *bufio.Reader) (rune, error) {
+	c, _, err := r.ReadRune()
+
+	return c, err
+}
+
+func consumeRune(r *bufio.Reader) error {
+	_, err := readRune(r)
+	return err
+}
+
+func peekRune(r *bufio.Reader) (rune, error) {
+	c, _, err := r.ReadRune()
+	if err != nil {
+		return '\ufffd', err
+	}
+
+	if err := r.UnreadRune(); err != nil {
+		return '\ufffd', err
+	}
+
+	return c, nil
+}
+
+func parseError(err error) StateFunc {
+	return func(_ *bufio.Reader, ch chan Token) StateFunc {
+		ch <- TokenFunc(func(*Metric) error { return err })
+		return nil
 	}
 }
 
@@ -266,18 +422,14 @@ func push(r io.Reader) error {
 	return nil
 }
 
-func (idp *IntDataPoint) SetTimeUnixNano(t int64) {
-	idp.TimeUnixNano = t
+type Clock interface {
+	Now() time.Time
 }
 
-func (idp *IntDataPoint) SetAttributes(attributes []Attribute) {
-	idp.Attributes = attributes
+type systemClock struct{}
+
+func (systemClock) Now() time.Time {
+	return time.Now()
 }
 
-func (ddp *DoubleDataPoint) SetTimeUnixNano(t int64) {
-	ddp.TimeUnixNano = t
-}
-
-func (ddp *DoubleDataPoint) SetAttributes(attributes []Attribute) {
-	ddp.Attributes = attributes
-}
+var clock Clock = systemClock{}

@@ -1,44 +1,69 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
 
-func TestDataPointJSON(t *testing.T) {
+type fakeClock struct {
+	Time time.Time
+}
+
+func (c fakeClock) Now() time.Time {
+	return c.Time
+}
+
+func TestMain(m *testing.M) {
+	clock = fakeClock{
+		Time: time.Now(),
+	}
+
+	m.Run()
+}
+func TestParseMetricLine(t *testing.T) {
 	tests := map[string]struct {
-		DataPoint DataPoint
-		Want      string
+		Line string
+		Want Metric
 	}{
 		"int": {
-			DataPoint: &IntDataPoint{
-				AsInt: 1,
+			Line: `metric_name{foo="bar", baz="qux"} 300`,
+			Want: Metric{
+				Name: "metric_name",
+				Gauge: Gauge{
+					DataPoints: []DataPoint{
+						DataPoint{
+							AsDouble:     300,
+							TimeUnixNano: clock.Now().UnixNano(),
+							Attributes: []Attribute{
+								Attribute{
+									Key: "foo",
+									Value: map[string]string{
+										"stringValue": "bar",
+									},
+								},
+								Attribute{
+									Key: "baz",
+									Value: map[string]string{
+										"stringValue": "qux",
+									},
+								},
+							},
+						},
+					},
+				},
 			},
-			Want: `{"asInt":1,"timeUnixNano":0,"attributes":null}
-`,
-		},
-		"double": {
-			DataPoint: &DoubleDataPoint{
-				AsDouble: 2.4,
-			},
-			Want: `{"asDouble":2.4,"timeUnixNano":0,"attributes":null}
-`,
 		},
 	}
 
 	for label, tt := range tests {
 		t.Run(label, func(t *testing.T) {
-			t.Parallel()
-
-			var buf bytes.Buffer
-			if err := json.NewEncoder(&buf).Encode(tt.DataPoint); err != nil {
+			got, err := parseMetricLine(tt.Line)
+			if err != nil {
 				t.Fatal(err)
 			}
 
-			got := buf.String()
 			if diff := cmp.Diff(got, tt.Want); diff != "" {
 				t.Fatal(diff)
 			}
