@@ -1,6 +1,9 @@
 ---
 name: switchbot
 on:
+  schedule:
+    # At every 5th minute from 3 through 59.
+    - cron: '3/5 * * * *'
   push:
   workflow_dispatch:
 
